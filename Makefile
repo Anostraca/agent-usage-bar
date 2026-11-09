@@ -1,4 +1,4 @@
-VERSION ?= 0.1.0
+VERSION ?= 0.1.1
 PREFIX  ?= $(HOME)/.local
 LDFLAGS := -s -w -X main.version=$(VERSION)
 PLATFORMS := darwin/arm64 darwin/amd64
