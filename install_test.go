@@ -9,7 +9,7 @@ import (
 
 func TestInstallPlugin(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "plugins")
-	p, err := installPlugin(dir, "/opt/it's here/claude-usage-bar")
+	p, err := installPlugin(dir, "/opt/it's here/claude-usage-bar", "0.2.0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,6 +24,10 @@ func TestInstallPlugin(t *testing.T) {
 	for _, want := range []string{
 		"#!/bin/bash\n",
 		"<xbar.title>Claude Usage</xbar.title>",
+		"<xbar.version>v0.2.0</xbar.version>",
+		"<xbar.author>Jiří Grmolec</xbar.author>",
+		"<xbar.author.github>Anostraca</xbar.author.github>",
+		"<xbar.abouturl>https://github.com/Anostraca/claude-usage-bar</xbar.abouturl>",
 		"<swiftbar.hideAbout>true</swiftbar.hideAbout>",
 		"<swiftbar.hideRunInTerminal>true</swiftbar.hideRunInTerminal>",
 		"<swiftbar.hideLastUpdated>true</swiftbar.hideLastUpdated>",
@@ -43,7 +47,7 @@ func TestInstallPluginReplacesSymlink(t *testing.T) {
 	if err := os.Symlink(target, p); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := installPlugin(dir, "/bin/cub"); err != nil {
+	if _, err := installPlugin(dir, "/bin/cub", "dev"); err != nil {
 		t.Fatal(err)
 	}
 	if data, _ := os.ReadFile(target); string(data) != "keep me" {
@@ -57,7 +61,7 @@ func TestInstallPluginReplacesSymlink(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(dir2, pluginName), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := installPlugin(dir2, "/bin/cub"); err == nil {
+	if _, err := installPlugin(dir2, "/bin/cub", "dev"); err == nil {
 		t.Error("want error when the plugin path is a directory")
 	}
 }

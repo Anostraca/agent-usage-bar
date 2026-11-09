@@ -26,10 +26,18 @@ func pluginDir(home string) string {
 }
 
 // pluginScript is the SwiftBar wrapper that runs exe every minute.
-func pluginScript(exe string) string {
+func pluginScript(exe, version string) string {
+	if version != "dev" && !strings.HasPrefix(version, "v") {
+		version = "v" + version
+	}
 	return `#!/bin/bash
 # <xbar.title>Claude Usage</xbar.title>
+# <xbar.version>` + version + `</xbar.version>
+# <xbar.author>Jiří Grmolec</xbar.author>
+# <xbar.author.github>Anostraca</xbar.author.github>
 # <xbar.desc>Claude session and weekly usage as battery icons</xbar.desc>
+# <xbar.dependencies>claude-usage-bar,claude-code</xbar.dependencies>
+# <xbar.abouturl>https://github.com/Anostraca/claude-usage-bar</xbar.abouturl>
 # <swiftbar.hideAbout>true</swiftbar.hideAbout>
 # <swiftbar.hideRunInTerminal>true</swiftbar.hideRunInTerminal>
 # <swiftbar.hideLastUpdated>true</swiftbar.hideLastUpdated>
@@ -38,7 +46,7 @@ exec '` + strings.ReplaceAll(exe, `'`, `'\''`) + `' "$@"
 }
 
 // installPlugin writes the wrapper into dir and returns its path.
-func installPlugin(dir, exe string) (string, error) {
+func installPlugin(dir, exe, version string) (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
@@ -52,7 +60,7 @@ func installPlugin(dir, exe string) (string, error) {
 		return "", err
 	}
 	defer os.Remove(f.Name())
-	_, werr := f.WriteString(pluginScript(exe))
+	_, werr := f.WriteString(pluginScript(exe, version))
 	cerr := f.Close()
 	if err := cmp.Or(werr, cerr, os.Chmod(f.Name(), 0o755)); err != nil {
 		return "", err
@@ -61,7 +69,7 @@ func installPlugin(dir, exe string) (string, error) {
 }
 
 func runInstallPlugin(home string, w io.Writer) error {
-	p, err := installPlugin(pluginDir(home), selfPath())
+	p, err := installPlugin(pluginDir(home), selfPath(), versionString())
 	if err != nil {
 		return err
 	}
