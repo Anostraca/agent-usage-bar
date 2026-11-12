@@ -56,7 +56,9 @@ func (c accountConf) account(home string) (Account, bool) {
 		return Account{}, false
 	}
 	dir := filepath.Join(home, p.dir)
-	if c.ConfigDir != "" {
+	if p.dir == "" {
+		dir = "" // no config dir; config_dir is ignored
+	} else if c.ConfigDir != "" {
 		if dir, ok = expandDir(c.ConfigDir, home); !ok {
 			return Account{}, false
 		}

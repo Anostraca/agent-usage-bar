@@ -1,10 +1,10 @@
 # claude-usage-bar
 
-A [SwiftBar](https://github.com/swiftbar/SwiftBar) plugin that shows your Claude and Codex subscription
-limits in the macOS menu bar. You get one small battery per Claude Code or Codex account, and it drains
-as you use the account.
+A [SwiftBar](https://github.com/swiftbar/SwiftBar) plugin that shows your Claude, Codex and Antigravity
+subscription limits in the macOS menu bar. You get one small battery per Claude Code, Codex or
+Antigravity account, and it drains as you use the account.
 
-Not affiliated with Anthropic or OpenAI. See [Disclaimer](#disclaimer).
+Not affiliated with Anthropic, OpenAI or Google. See [Disclaimer](#disclaimer).
 
 ## What it shows
 
@@ -25,7 +25,20 @@ Not affiliated with Anthropic or OpenAI. See [Disclaimer](#disclaimer).
 - **Faded** battery: the data is stale, e.g. the API failed or the login token has expired.
   **Outline with "?"**: no data yet.
 
-Click the icon for details on each account:
+Click the icon for one line per account: its battery and what is left of each limit. The line turns
+amber or red with the most used limit, and says `stale` or `no data` when that applies.
+
+```
+▭ work    5h 100% · week 65% · Fable 100%    ▸
+▭ max     week 30% · Fable 74%               ▸
+▭ codex   5h 100% · week 99%                 ▸
+▭ agy     lowest 99%                         ▸
+Updated 00:20
+Refresh now
+Usage pages                                  ▸ one link per provider
+```
+
+Each account line opens a submenu with the details:
 
 ```
 work · team 5x · you@example.com
@@ -38,6 +51,8 @@ Today   522M tok · 3.1M out · 2.7k msgs · cache 98%
 today ▂▁▁▁▁▁▂▁▁▂▂▃▆█▄▂▂                 output tokens per hour
 Top projects today                     ▸
 Models · 7 days                        ▸
+───
+✓ Show in menu bar
 ```
 
 The limit rows come from Anthropic's usage API, with a row for each per-model weekly limit. Sessions
@@ -48,7 +63,14 @@ ChatGPT's usage API and are labelled by window length (`5h`, `week`), with extra
 and other limits when the plan has them. Token numbers come from Codex's session logs. There is no
 running-sessions line for Codex.
 
-Each account ends with a **Show in menu bar** item. Untick it to keep that account in the dropdown
+Antigravity accounts show one row per model quota (variants such as `(High)` and `(Low)` merged into
+one row), plus a `lowest` row on top. The battery and the account line show the model with the least
+left right now (a model whose reset has passed counts as unused). The numbers come from the
+Antigravity app itself, so they only refresh while it runs. When it is closed, the last numbers stay
+with a gray `Antigravity not running` note. When the app runs but its server can't be found or doesn't
+answer, the note is `Antigravity server not reachable` and old numbers fade as for the other accounts.
+
+Each account's submenu ends with a **Show in menu bar** item. Untick it to keep that account in the dropdown
 only. With every account hidden, the menu bar shows the text `AI`.
 
 ## Requirements
@@ -58,7 +80,8 @@ only. With every account hidden, the menu bar shows the text `AI`.
 - [Claude Code](https://docs.claude.com/en/docs/claude-code) logged in with a Claude Pro, Max or Team
   subscription (not an API key), and/or
 - [Codex](https://developers.openai.com/codex) logged in with a ChatGPT plan (`codex login`, not an API
-  key)
+  key), and/or
+- [Antigravity](https://antigravity.google) signed in (numbers refresh only while the app is running)
 
 ## Install
 
@@ -101,18 +124,21 @@ List one entry per login:
   "accounts": [
     {"name": "work", "config_dir": "~/.claude"},
     {"name": "personal", "config_dir": "~/.claude-personal", "bar": false},
-    {"name": "codex", "provider": "codex"}
+    {"name": "codex", "provider": "codex"},
+    {"name": "agy", "provider": "antigravity"}
   ]
 }
 ```
 
-- `provider`: `claude` (the default) or `codex`. Entries with another provider are skipped.
+- `provider`: `claude` (the default), `codex` or `antigravity`. Entries with another provider are
+  skipped.
 - `config_dir`: the `CLAUDE_CONFIG_DIR` (or `CODEX_HOME`) that login uses. Empty means `~/.claude` or
-  `~/.codex`. Relative paths are skipped.
+  `~/.codex`. Relative paths are skipped. Antigravity ignores it.
 - `bar`: `false` shows the account in the dropdown only. The default is `true`.
 
 Without the file you get `claude` with `~/.claude`, plus `codex` with `~/.codex` when
-`~/.codex/auth.json` exists. The first letter of each name appears in the menu bar.
+`~/.codex/auth.json` holds a ChatGPT login. Antigravity is only shown when it is in the file. The
+first letter of each name appears in the menu bar.
 
 The **Show in menu bar** item runs `--toggle-bar`, which rewrites this file: it sets `"bar": false` or
 removes the key, and keeps everything else. Without a file it writes the default accounts. A file that
@@ -136,6 +162,10 @@ isn't valid JSON is left alone.
   account.
 - **Codex tokens**: `token_count` events in `<config_dir>/sessions/YYYY/MM/DD/rollout-*.jsonl`, with
   the model and folder of the latest turn. Same 7 days and incremental reads as above.
+- **Antigravity**: the app's own language server. `ps` finds the running `language_server` of
+  `Antigravity.app` and its `--csrf_token` argument, `lsof` its local ports. Then
+  `POST https://127.0.0.1:<port>/exa.language_server_pb.LanguageServerService/GetUserStatus` (or
+  `http://`), at most every 3 minutes. Plan, email and model quotas come from the answer.
 
 Caches live in `~/Library/Caches/claude-usage-bar/`.
 
@@ -153,14 +183,18 @@ the parsed state), `--toggle-bar ID` (show or hide an account in the menu bar), 
   the working folder. Message text is never stored or shown.
 - Caches hold usage percentages, reset times, token counts, model and folder names. No tokens, no
   message content.
-- Network requests go only to `api.anthropic.com` and `chatgpt.com`.
+- Antigravity's CSRF token is read from the process arguments, sent only to its server on
+  `127.0.0.1`, and never stored. That server's self-signed certificate is accepted on that loopback
+  connection only.
+- Network requests go only to `api.anthropic.com`, `chatgpt.com` and Antigravity's server on
+  `127.0.0.1`. Nothing about Antigravity leaves the machine.
 - The config file is only written by the **Show in menu bar** item.
 
 ## Disclaimer
 
-`/api/oauth/usage` and `/backend-api/wham/usage` are undocumented, unofficial endpoints. Claude Code and
-Codex use them, but they may change or disappear at any time. This project is not affiliated with or
-endorsed by Anthropic or OpenAI.
+`/api/oauth/usage`, `/backend-api/wham/usage` and Antigravity's `GetUserStatus` are undocumented,
+unofficial or internal endpoints. Claude Code, Codex and Antigravity use them, but they may change or
+disappear at any time. This project is not affiliated with or endorsed by Anthropic, OpenAI or Google.
 
 ## License
 

@@ -1,5 +1,5 @@
-// Command claude-usage-bar is a SwiftBar plugin that shows Claude and
-// Codex subscription usage for every account as battery icons.
+// Command claude-usage-bar is a SwiftBar plugin that shows Claude, Codex
+// and Antigravity subscription usage for every account as battery icons.
 package main
 
 import (
@@ -13,7 +13,7 @@ import (
 
 var version = "dev"
 
-const usageText = `claude-usage-bar - Claude and Codex usage battery icons for SwiftBar
+const usageText = `claude-usage-bar - Claude, Codex and Antigravity usage battery icons for SwiftBar
 
 Usage: claude-usage-bar [flag]
 

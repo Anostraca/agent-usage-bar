@@ -56,9 +56,9 @@ func barGauges(states []State, now time.Time) []gauge {
 	return gs
 }
 
-// writeMenu prints the SwiftBar output: title image, then the dropdown.
-// Without any account in the menu bar the title is plain text, so the
-// dropdown can still be opened.
+// writeMenu prints the SwiftBar output: title image, then one line per
+// account with its details in a submenu. Without any account in the menu
+// bar the title is plain text, so the dropdown can still be opened.
 func writeMenu(w io.Writer, states []State, now time.Time, dark bool, exe, home string) error {
 	if gs := barGauges(states, now); len(gs) > 0 {
 		title, err := iconB64(gs, dark, true)
@@ -71,78 +71,32 @@ func writeMenu(w io.Writer, states []State, now time.Time, dark bool, exe, home 
 	}
 	fmt.Fprintln(w, "---")
 
+	names := make([]string, len(states))
+	for i, s := range states {
+		names[i] = s.Name
+	}
+	names = padded(names)
 	var updated time.Time
 	var provs []string
 	for i, s := range states {
-		if i > 0 {
-			fmt.Fprintln(w, "---")
-		}
-		if !slices.Contains(provs, s.Provider) {
+		p, _ := providerOf(s.Provider)
+		if p.usageURL != "" && !slices.Contains(provs, s.Provider) {
 			provs = append(provs, s.Provider)
 		}
 		img, err := iconB64([]gauge{toGauge(s, now)}, dark, false)
 		if err != nil {
 			return err
 		}
-		head := []string{s.Name}
-		if s.Plan != "" {
-			head = append(head, s.Plan)
+		text, color := accountLine(s, p, now)
+		params := "image=" + img + " " + rowParams
+		if color != "" {
+			params += " color=" + color
 		}
-		if s.Email != "" {
-			head = append(head, s.Email)
+		fmt.Fprintf(w, "%s | %s\n", clean(names[i]+"   "+text), params)
+		writeAccount(w, sub, s, p, now, exe, home)
+		if s.HasData && s.FetchedAt.After(updated) {
+			updated = s.FetchedAt
 		}
-		if s.HasData && s.Session == nil {
-			head = append(head, "no 5h limit")
-		}
-		params := "image=" + img
-		if s.Org != "" {
-			params += " tooltip=" + textParam(s.Org)
-		}
-		fmt.Fprintf(w, "%s | %s\n", clean(strings.Join(head, " · ")), params)
-
-		if s.HasData {
-			if s.Session != nil {
-				writeRow(w, cmp.Or(s.Session.Label, "5h"), s.Session, now)
-			}
-			weekLabel := "week"
-			if s.Week != nil {
-				weekLabel = cmp.Or(s.Week.Label, weekLabel)
-			}
-			writeRow(w, weekLabel, s.Week, now)
-			for i := range s.Scoped {
-				writeRow(w, s.Scoped[i].Label, &s.Scoped[i], now)
-			}
-			if len(s.Surfaces) > 0 {
-				parts := make([]string, len(s.Surfaces))
-				for i, x := range s.Surfaces {
-					parts[i] = fmt.Sprintf("%s %.0f%%", x.Name, x.Percent)
-				}
-				grayLine(w, "week by surface: "+strings.Join(parts, " · "))
-			}
-			if s.Credits != "" {
-				grayLine(w, "credits used "+s.Credits)
-			}
-			switch s.Balance {
-			case "":
-			case "unlimited":
-				grayLine(w, "credits unlimited")
-			default:
-				grayLine(w, "credits balance "+s.Balance)
-			}
-			if s.FetchedAt.After(updated) {
-				updated = s.FetchedAt
-			}
-		}
-		if line := statusLine(s); line != "" {
-			grayLine(w, line)
-		}
-		writeLocal(w, s, home)
-		toggle := fmt.Sprintf("Show in menu bar | bash=%s param1=--toggle-bar param2=%s terminal=false refresh=true",
-			pathParam(exe), hashHex(accountKey(s.Provider, s.Name), 4))
-		if s.Bar {
-			toggle += " checked=true"
-		}
-		fmt.Fprintln(w, toggle)
 	}
 
 	fmt.Fprintln(w, "---")
@@ -150,25 +104,136 @@ func writeMenu(w io.Writer, states []State, now time.Time, dark bool, exe, home 
 		fmt.Fprintf(w, "Updated %s | color=%s size=11\n", updated.Local().Format("15:04"), gray)
 	}
 	fmt.Fprintf(w, "Refresh now | bash=%s param1=--force terminal=false refresh=true\n", pathParam(exe))
-	if len(provs) <= 1 {
-		name := "" // no accounts: Claude's page
-		if len(provs) == 1 {
-			name = provs[0]
-		}
-		p, _ := providerOf(name)
-		fmt.Fprintf(w, "Usage page | href=%s\n", p.usageURL)
-		return nil
+	if len(states) == 0 {
+		provs = []string{""} // no accounts: Claude's page
 	}
-	for _, name := range provs {
-		p, _ := providerOf(name)
-		fmt.Fprintf(w, "%s usage page | href=%s\n", p.title, p.usageURL)
+	switch len(provs) {
+	case 0:
+	case 1:
+		p, _ := providerOf(provs[0])
+		fmt.Fprintf(w, "Usage page | href=%s\n", p.usageURL)
+	default:
+		fmt.Fprintln(w, "Usage pages")
+		for _, name := range provs {
+			p, _ := providerOf(name)
+			fmt.Fprintf(w, "%s%s usage page | href=%s\n", sub, p.title, p.usageURL)
+		}
 	}
 	return nil
 }
 
-func writeRow(w io.Writer, label string, win *Window, now time.Time) {
+// sub is one SwiftBar submenu level; subSep is a separator inside one.
+const (
+	sub    = "--"
+	subSep = "-----"
+)
+
+// accountLine is the account's top-level summary: what is left of each
+// window, worst colour first. Errors with data stay in the submenu.
+func accountLine(s State, p provider, now time.Time) (text, color string) {
+	if !s.HasData {
+		return "no data", ""
+	}
+	var parts []string
+	worst := 0.0
+	add := func(label string, win *Window) {
+		if win == nil {
+			return
+		}
+		e := effective(win, now)
+		worst = max(worst, e)
+		parts = append(parts, fmt.Sprintf("%s %.0f%%", label, 100-clampPct(e)))
+	}
+	if s.Session != nil && !p.lowestModel {
+		add(cmp.Or(s.Session.Label, "5h"), s.Session)
+	}
+	if s.Week != nil {
+		add(cmp.Or(s.Week.Label, "week"), s.Week)
+	}
+	if !p.lowestModel {
+		for i := range s.Scoped {
+			add(s.Scoped[i].Label, &s.Scoped[i])
+		}
+	}
+	text = strings.Join(parts, " · ")
+	if s.Stale {
+		text += " · stale"
+	}
+	return text, levelHex(worst)
+}
+
+// writeAccount prints an account's details, each line led by prefix.
+func writeAccount(w io.Writer, prefix string, s State, p provider, now time.Time, exe, home string) {
+	head := []string{s.Name}
+	if s.Plan != "" {
+		head = append(head, s.Plan)
+	}
+	if s.Email != "" {
+		head = append(head, s.Email)
+	}
+	if s.HasData && s.Session == nil && p.noLimitNote != "" {
+		head = append(head, p.noLimitNote)
+	}
+	line := prefix + clean(strings.Join(head, " · "))
+	if s.Org != "" {
+		line += " | tooltip=" + textParam(s.Org)
+	}
+	fmt.Fprintln(w, line)
+
+	if s.HasData {
+		weekLabel := "week"
+		if s.Week != nil {
+			weekLabel = cmp.Or(s.Week.Label, weekLabel)
+		}
+		width := 0 // 0: row()'s own column
+		if p.padLabels {
+			width = len([]rune(weekLabel))
+			for _, x := range s.Scoped {
+				width = max(width, len([]rune(x.Label)))
+			}
+			width++
+		}
+		if s.Session != nil {
+			writeRow(w, prefix, padTo(cmp.Or(s.Session.Label, "5h"), width), s.Session, now)
+		}
+		writeRow(w, prefix, padTo(weekLabel, width), s.Week, now)
+		for i := range s.Scoped {
+			writeRow(w, prefix, padTo(s.Scoped[i].Label, width), &s.Scoped[i], now)
+		}
+		if len(s.Surfaces) > 0 {
+			parts := make([]string, len(s.Surfaces))
+			for i, x := range s.Surfaces {
+				parts[i] = fmt.Sprintf("%s %.0f%%", x.Name, x.Percent)
+			}
+			grayLine(w, prefix, "week by surface: "+strings.Join(parts, " · "))
+		}
+		if s.Credits != "" {
+			grayLine(w, prefix, "credits used "+s.Credits)
+		}
+		switch s.Balance {
+		case "":
+		case "unlimited":
+			grayLine(w, prefix, "credits unlimited")
+		default:
+			grayLine(w, prefix, "credits balance "+s.Balance)
+		}
+	}
+	if line := statusLine(s); line != "" {
+		grayLine(w, prefix, line)
+	}
+	writeLocal(w, prefix, s, home)
+	fmt.Fprintln(w, subSep)
+	toggle := fmt.Sprintf("%sShow in menu bar | bash=%s param1=--toggle-bar param2=%s terminal=false refresh=true",
+		prefix, pathParam(exe), hashHex(accountKey(s.Provider, s.Name), 4))
+	if s.Bar {
+		toggle += " checked=true"
+	}
+	fmt.Fprintln(w, toggle)
+}
+
+func writeRow(w io.Writer, prefix, label string, win *Window, now time.Time) {
 	if win == nil {
-		fmt.Fprintf(w, "%s | %s\n", row(label, -1, "no data"), rowParams)
+		fmt.Fprintf(w, "%s%s | %s\n", prefix, clean(row(label, -1, "no data")), rowParams)
 		return
 	}
 	p := effective(win, now)
@@ -184,15 +249,22 @@ func writeRow(w io.Writer, label string, win *Window, now time.Time) {
 	if c := levelHex(p); c != "" {
 		params += " color=" + c
 	}
-	fmt.Fprintf(w, "%s | %s\n", clean(row(label, p, tail)), params)
+	fmt.Fprintf(w, "%s%s | %s\n", prefix, clean(row(label, p, tail)), params)
 }
 
-func grayLine(w io.Writer, s string) {
-	fmt.Fprintf(w, "%s | color=%s size=11\n", clean(s), gray)
+// padTo right-pads s to n runes.
+func padTo(s string, n int) string {
+	return s + strings.Repeat(" ", max(n-len([]rune(s)), 0))
 }
 
-// writeLocal prints running sessions and token stats from the transcripts.
-func writeLocal(w io.Writer, s State, home string) {
+func grayLine(w io.Writer, prefix, s string) {
+	fmt.Fprintf(w, "%s%s | color=%s size=11\n", prefix, clean(s), gray)
+}
+
+// writeLocal prints running sessions and token stats from the transcripts,
+// each line led by prefix; per-item rows go one level deeper.
+func writeLocal(w io.Writer, prefix string, s State, home string) {
+	deeper := prefix + sub
 	if n := len(s.Sessions); n > 0 {
 		counts := map[string]int{}
 		var order []string
@@ -210,9 +282,9 @@ func writeLocal(w io.Writer, s State, home string) {
 		for _, st := range order {
 			parts = append(parts, fmt.Sprintf("%d %s", counts[st], cmp.Or(st, "unknown")))
 		}
-		fmt.Fprintf(w, "● %s · %s\n", plural(n, "session"), clean(strings.Join(parts, ", ")))
+		fmt.Fprintf(w, "%s● %s · %s\n", prefix, plural(n, "session"), clean(strings.Join(parts, ", ")))
 		for i, x := range s.Sessions {
-			fmt.Fprintf(w, "--%s | %s\n", clean(names[i]+"  "+shortPath(x.Cwd, home)+"  "+x.Status), rowParams)
+			fmt.Fprintf(w, "%s%s | %s\n", deeper, clean(names[i]+"  "+shortPath(x.Cwd, home)+"  "+x.Status), rowParams)
 		}
 	}
 
@@ -220,29 +292,29 @@ func writeLocal(w io.Writer, s State, home string) {
 	if st == nil || st.Week.Msgs == 0 {
 		return
 	}
-	fmt.Fprintf(w, "Today   %s tok · %s out · %s msgs · cache %.0f%% | %s\n",
-		human(st.Today.All()), human(st.Today.Output), human(st.Today.Msgs), st.Today.CachePct(), rowParams)
-	fmt.Fprintf(w, "7 days  %s tok · %s out · %s msgs | %s\n",
-		human(st.Week.All()), human(st.Week.Output), human(st.Week.Msgs), rowParams)
+	fmt.Fprintf(w, "%sToday   %s tok · %s out · %s msgs · cache %.0f%% | %s\n",
+		prefix, human(st.Today.All()), human(st.Today.Output), human(st.Today.Msgs), st.Today.CachePct(), rowParams)
+	fmt.Fprintf(w, "%s7 days  %s tok · %s out · %s msgs | %s\n",
+		prefix, human(st.Week.All()), human(st.Week.Output), human(st.Week.Msgs), rowParams)
 	if st.Today.Msgs > 0 {
-		fmt.Fprintf(w, "today %s | %s color=%s\n", spark(st.Hourly), rowParams, gray)
+		fmt.Fprintf(w, "%stoday %s | %s color=%s\n", prefix, spark(st.Hourly), rowParams, gray)
 	}
 	if len(st.Projects) > 0 {
-		fmt.Fprintln(w, "Top projects today")
+		fmt.Fprintln(w, prefix+"Top projects today")
 		names := padded(countNames(st.Projects))
 		for i, p := range st.Projects {
-			fmt.Fprintf(w, "--%s  %6s tok | %s\n", clean(names[i]), human(p.Tokens), rowParams)
+			fmt.Fprintf(w, "%s%s  %6s tok | %s\n", deeper, clean(names[i]), human(p.Tokens), rowParams)
 		}
 	}
 	if len(st.Models) > 0 && st.Week.All() > 0 {
-		fmt.Fprintln(w, "Models · 7 days")
+		fmt.Fprintln(w, prefix+"Models · 7 days")
 		names := padded(countNames(st.Models))
 		for i, m := range st.Models {
 			share := fmt.Sprintf("%3.0f%%", float64(m.Tokens)*100/float64(st.Week.All()))
 			if m.Tokens*100 < st.Week.All() {
 				share = " <1%"
 			}
-			fmt.Fprintf(w, "--%s  %s | %s\n", clean(names[i]), share, rowParams)
+			fmt.Fprintf(w, "%s%s  %s | %s\n", deeper, clean(names[i]), share, rowParams)
 		}
 	}
 }

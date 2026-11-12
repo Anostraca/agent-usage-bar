@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -55,7 +56,8 @@ type Usage struct {
 
 // Cache is what we keep per account between runs. Never holds tokens.
 type Cache struct {
-	Plan string `json:"plan,omitempty"`
+	Plan  string `json:"plan,omitempty"`
+	Email string `json:"email,omitempty"` // from the API, for providers without a local profile
 	Usage
 	FetchedAt time.Time `json:"fetched_at,omitzero"` // last good fetch
 	AttemptAt time.Time `json:"attempt_at,omitzero"` // last API call
@@ -85,6 +87,8 @@ type app struct {
 	now        func() time.Time
 	keychain   func(service string) ([]byte, error)
 	client     *http.Client
+	agyFind    func() ([]agyProc, error)
+	agyHTTP    *http.Client // loopback only, never for remote APIs
 }
 
 func newApp() (*app, error) {
@@ -105,6 +109,8 @@ func newApp() (*app, error) {
 			// Never send the token on to a redirect target.
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 		},
+		agyFind: findAntigravity,
+		agyHTTP: agyClient(),
 	}, nil
 }
 
@@ -125,7 +131,7 @@ func (a *app) refresh(acc Account, force bool) State {
 	p, _ := providerOf(acc.Provider)
 	now := a.now()
 	c := a.loadCache(acc.key())
-	due := force || c.AttemptAt.IsZero() || now.Sub(c.AttemptAt) >= fetchInterval || loginError(c.Error)
+	due := force || c.AttemptAt.IsZero() || now.Sub(c.AttemptAt) >= fetchInterval || retryError(c.Error)
 	if due {
 		before := c
 		p.update(a, &c, acc, now)
@@ -137,13 +143,19 @@ func (a *app) refresh(acc Account, force bool) State {
 		}
 	}
 	pr := p.profile(acc.ConfigDir, a.home)
-	st := State{Name: acc.Name, Provider: acc.Provider, Bar: acc.Bar, Email: pr.Email, Org: pr.Org, Cache: c}
+	st := State{Name: acc.Name, Provider: acc.Provider, Bar: acc.Bar, Email: cmp.Or(pr.Email, c.Email), Org: pr.Org, Cache: c}
 	st.HasData = !c.FetchedAt.IsZero()
-	st.Stale = st.HasData && (loginError(c.Error) || now.Sub(c.FetchedAt) > staleAfter)
+	// A closed app can't use its quota: its last data stays current.
+	st.Stale = st.HasData && c.Error != errAgyNotRunning && (loginError(c.Error) || now.Sub(c.FetchedAt) > staleAfter)
+	if p.lowestModel {
+		st.Week = lowestWindow(st.Scoped, now)
+	}
 	if p.sessions != nil {
 		st.Sessions = p.sessions(acc.ConfigDir)
 	}
-	st.Stats = p.stats(a, acc, now, force)
+	if p.stats != nil {
+		st.Stats = p.stats(a, acc, now, force)
+	}
 	return st
 }
 

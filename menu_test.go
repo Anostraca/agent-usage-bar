@@ -41,14 +41,21 @@ func TestHostileTextNoParamInjection(t *testing.T) {
 	if n := strings.Count(out, "href="); n != 1 {
 		t.Errorf("href= appears %d times\n%s", n, out)
 	}
-	head := strings.Split(out, "\n")[2]
-	_, params, _ := strings.Cut(head, " | ")
-	// Only image= and one quoted tooltip= without inner quotes.
-	if !regexp.MustCompile(`^image=[A-Za-z0-9+/=]+ tooltip="[^"']*"$`).MatchString(params) {
-		t.Errorf("header params injected: %q", params)
+	lines := strings.Split(out, "\n")
+	for _, c := range []struct {
+		line   string
+		params string
+	}{
+		{lines[2], `^image=[A-Za-z0-9+/=]+ font=Menlo size=12$`}, // account line
+		{lines[3], `^tooltip="[^"']*"$`},                         // head in the submenu: one quoted tooltip
+	} {
+		_, params, _ := strings.Cut(c.line, " | ")
+		if !regexp.MustCompile(c.params).MatchString(params) || strings.Count(c.line, "|") != 1 {
+			t.Errorf("params injected: %q", c.line)
+		}
 	}
-	if strings.Count(head, "|") != 1 {
-		t.Errorf("header has extra separators: %q", head)
+	if !strings.HasPrefix(lines[3], "--") || strings.HasPrefix(lines[3], "---") {
+		t.Errorf("head not a submenu item: %q", lines[3])
 	}
 }
 
@@ -108,30 +115,35 @@ func TestWriteMenu(t *testing.T) {
 	out := b.String()
 	for _, want := range []string{
 		"| image=",
-		"work · team 5x · a@example.com | image=",
-		"5h    █░░░░░░░░░░░░   7% left   resets 15:39 (in 23m) | font=Menlo size=12 color=#E5534B",
-		"week  ████████░░░░░  65% left   resets ",
+		// One top-level line per account: names padded, worst colour.
+		"\nwork       5h 7% · week 65% · Fable 20% | image=",
+		" font=Menlo size=12 color=#E5534B\n--work · team 5x · a@example.com\n",
+		"\npersonal   week 100% · stale | image=",
+		"\nidle       5h 100% · week 99% | image=",
+		"\nnew        no data | image=",
+		// Details one level down, sessions and top lists two.
+		"\n--5h    █░░░░░░░░░░░░   7% left   resets 15:39 (in 23m) | font=Menlo size=12 color=#E5534B\n",
+		"\n--week  ████████░░░░░  65% left   resets ",
 		"(in 5d 4h) | font=Menlo size=12\n",
-		"Fable ███░░░░░░░░░░  20% left   resets 16:16 (in 1h 0m) | font=Menlo size=12 color=#E0A030",
-		"● 3 sessions · 2 busy, 1 idle\n",
-		"--api        ~/src/api  busy | font=Menlo size=12\n",
-		"--docs-site  /srv/docs  idle |",
-		"Today   85M tok · 700k out · 637 msgs · cache 97% | font=Menlo size=12\n",
-		"7 days  2.8B tok · 13M out · 12.7k msgs | font=Menlo size=12\n",
-		"today ▁▁▂▅█ | font=Menlo size=12 color=#8E8E93\n",
-		"Top projects today\n--api     60M tok |",
-		"Models · 7 days\n--claude-opus-5-5   90% |",
-		"personal · no 5h limit | image=",
-		"week  █████████████ 100% left   idle · starts with next message |",
-		"week by surface: Claude Code 100% | color=#8E8E93 size=11",
-		"credits used $1.50 | color=#8E8E93 size=11",
-		"5h    █████████████ 100% left   idle · starts with next message | font=Menlo size=12\n",
-		"stale · HTTP 429 · updated 14:56 | color=#8E8E93 size=11",
-		"no data · " + errNoCreds.Error(),
-		"Updated 15:16 |",
+		"\n--Fable ███░░░░░░░░░░  20% left   resets 16:16 (in 1h 0m) | font=Menlo size=12 color=#E0A030\n",
+		"\n--● 3 sessions · 2 busy, 1 idle\n----api        ~/src/api  busy | font=Menlo size=12\n",
+		"\n----docs-site  /srv/docs  idle |",
+		"\n--Today   85M tok · 700k out · 637 msgs · cache 97% | font=Menlo size=12\n",
+		"\n--7 days  2.8B tok · 13M out · 12.7k msgs | font=Menlo size=12\n",
+		"\n--today ▁▁▂▅█ | font=Menlo size=12 color=#8E8E93\n",
+		"\n--Top projects today\n----api     60M tok |",
+		"\n--Models · 7 days\n----claude-opus-5-5   90% |",
+		"\n--personal · no 5h limit\n",
+		"\n--week  █████████████ 100% left   idle · starts with next message |",
+		"\n--week by surface: Claude Code 100% | color=#8E8E93 size=11\n",
+		"\n--credits used $1.50 | color=#8E8E93 size=11\n",
+		"\n--5h    █████████████ 100% left   idle · starts with next message | font=Menlo size=12\n",
+		"\n--stale · HTTP 429 · updated 14:56 | color=#8E8E93 size=11\n",
+		"\n--no data · " + errNoCreds.Error(),
+		"\n---\nUpdated 15:16 |",
 		`Refresh now | bash="/opt/my bin/cub" param1=--force terminal=false refresh=true`,
 		"\nUsage page | href=https://claude.ai/settings/usage\n",
-		`Show in menu bar | bash="/opt/my bin/cub" param1=--toggle-bar param2=` + hashHex("work", 4) + " terminal=false refresh=true checked=true\n",
+		"\n-----\n--Show in menu bar | bash=\"/opt/my bin/cub\" param1=--toggle-bar param2=" + hashHex("work", 4) + " terminal=false refresh=true checked=true\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("menu missing %q\n%s", want, out)
@@ -140,10 +152,13 @@ func TestWriteMenu(t *testing.T) {
 	if !strings.HasPrefix(out, "| image=") {
 		t.Errorf("first line: %q", strings.SplitN(out, "\n", 2)[0])
 	}
-	if strings.Count(out, "5h    ") != 2 {
+	if strings.Count(out, "--5h    ") != 2 {
 		t.Errorf("want 5h rows only for accounts with a 5h limit\n%s", out)
 	}
-	if strings.Count(out, "Show in menu bar |") != 4 || strings.Contains(out, "Claude usage page") ||
+	if strings.Count(out, "\n---\n") != 2 || strings.Count(out, "\n-----\n") != 4 { // after the title and before Updated
+		t.Errorf("separators:\n%s", out)
+	}
+	if strings.Count(out, "\n--Show in menu bar |") != 4 || strings.Contains(out, "Usage pages") || strings.Contains(out, "Claude usage page") ||
 		strings.Contains(out, "credits unlimited") || strings.Contains(out, "credits balance") {
 		t.Errorf("claude-only extras:\n%s", out)
 	}
@@ -174,22 +189,25 @@ func TestWriteMenuBarAndProviders(t *testing.T) {
 		t.Errorf("title is not the bar accounts' icon: %.60s", first)
 	}
 	for _, want := range []string{
-		"max · no 5h limit | image=",
-		"cx · team · cx@example.com | image=",
-		"5h    ██████████░░░  80% left   resets 16:16 (in 1h 0m) |",
-		"3d    ███░░░░░░░░░░  20% left   resets ",
-		"review week█████████████ 100% left   idle · starts with next message |",
-		"credits unlimited | color=#8E8E93 size=11\n",
-		"Show in menu bar | bash=/bin/cub param1=--toggle-bar param2=" + hashHex("team", 4) + " terminal=false refresh=true checked=true\n",
-		"Show in menu bar | bash=/bin/cub param1=--toggle-bar param2=" + hashHex("max", 4) + " terminal=false refresh=true\n",
-		"Show in menu bar | bash=/bin/cub param1=--toggle-bar param2=" + hashHex(accountKey("codex", "cx"), 4) + " terminal=false refresh=true checked=true\n",
-		"\nClaude usage page | href=https://claude.ai/settings/usage\nCodex usage page | href=https://chatgpt.com/codex/settings/usage\n",
+		"\nteam   week 90% | image=",
+		"\nmax    week 50% | image=",
+		"\ncx     5h 80% · 3d 20% · review week 100% | image=",
+		" font=Menlo size=12 color=#E0A030\n--cx · team · cx@example.com\n",
+		"\n--max · no 5h limit\n",
+		"\n--5h    ██████████░░░  80% left   resets 16:16 (in 1h 0m) |",
+		"\n--3d    ███░░░░░░░░░░  20% left   resets ",
+		"\n--review week█████████████ 100% left   idle · starts with next message |",
+		"\n--credits unlimited | color=#8E8E93 size=11\n",
+		"\n--Show in menu bar | bash=/bin/cub param1=--toggle-bar param2=" + hashHex("team", 4) + " terminal=false refresh=true checked=true\n",
+		"\n--Show in menu bar | bash=/bin/cub param1=--toggle-bar param2=" + hashHex("max", 4) + " terminal=false refresh=true\n",
+		"\n--Show in menu bar | bash=/bin/cub param1=--toggle-bar param2=" + hashHex(accountKey("codex", "cx"), 4) + " terminal=false refresh=true checked=true\n",
+		"\nUsage pages\n--Claude usage page | href=https://claude.ai/settings/usage\n--Codex usage page | href=https://chatgpt.com/codex/settings/usage\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("menu missing %q\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, "\nUsage page") || strings.Count(out, "week  ") != 2 { // team and max only
+	if strings.Contains(out, "\nUsage page |") || strings.Count(out, "--week  ") != 2 { // team and max only
 		t.Errorf("unexpected lines\n%s", out)
 	}
 
@@ -249,6 +267,29 @@ func TestShortPath(t *testing.T) {
 	for p, want := range cases {
 		if got := shortPath(p, "/h"); got != want {
 			t.Errorf("shortPath(%q) = %q, want %q", p, got, want)
+		}
+	}
+}
+
+func TestUsageLinks(t *testing.T) {
+	now := time.Date(2026, 11, 9, 15, 16, 0, 0, time.Local)
+	st := func(prov string) State { return State{Name: "a" + prov, Provider: prov} }
+	cases := []struct {
+		states []State
+		want   string
+	}{
+		{nil, "\nUsage page | href=" + usageURL + "\n"},
+		{[]State{st("antigravity")}, "\nRefresh now | bash=/bin/cub param1=--force terminal=false refresh=true\n"},
+		{[]State{st("codex"), st("antigravity")}, "\nUsage page | href=" + codexUsageURL + "\n"},
+		{[]State{st(""), st("codex")}, "\nUsage pages\n--Claude usage page | href=" + usageURL + "\n--Codex usage page | href=" + codexUsageURL + "\n"},
+	}
+	for i, c := range cases {
+		var b bytes.Buffer
+		if err := writeMenu(&b, c.states, now, false, "/bin/cub", "/h"); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.HasSuffix(b.String(), c.want) {
+			t.Errorf("case %d: output ends\n%s", i, b.String())
 		}
 	}
 }
