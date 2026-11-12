@@ -137,23 +137,41 @@ type fileAgg struct {
 	Models   []string `json:"models"`
 	Projects []string `json:"projects"` // cwd base names
 	Recs     []rec    `json:"recs"`
+
+	// Codex rollout state carried between incremental reads.
+	Session string `json:"session,omitempty"` // session id hash
+	Model   string `json:"model,omitempty"`
+	Project string `json:"project,omitempty"`
+	Total   int64  `json:"total,omitempty"` // last counted cumulative total
+}
+
+// logSource is where an account's local logs are and how to read one.
+type logSource struct {
+	root   string // walked for *.jsonl
+	prefix string // file name prefix, "" = any
+	parse  func(path string, fa *fileAgg, cut int64, deadline time.Time) (done bool, err error)
 }
 
 // stats returns the account's local stats, recomputed at most every
 // statsInterval. Changed transcripts are read from where they were left.
 func (a *app) stats(acc Account, now time.Time, force bool) *Stats {
-	root := filepath.Join(acc.ConfigDir, "projects")
+	return a.localStats(acc, logSource{root: filepath.Join(acc.ConfigDir, "projects"), parse: parseTranscript}, now, force)
+}
+
+// localStats walks src.root and reads each changed log with src.parse.
+func (a *app) localStats(acc Account, src logSource, now time.Time, force bool) *Stats {
+	root := src.root
 	if fi, err := os.Stat(root); err != nil || !fi.IsDir() {
 		return nil
 	}
-	statsPath := a.cacheFile("stats", acc.Name)
+	statsPath := a.cacheFile("stats", acc.key())
 	var cached Stats
 	if readJSON(statsPath, &cached) && !force && now.Sub(cached.At) < statsInterval && now.Sub(cached.At) >= 0 &&
 		sameDay(cached.At, now) {
 		return &cached
 	}
 
-	indexPath := a.cacheFile("files", acc.Name)
+	indexPath := a.cacheFile("files", acc.key())
 	index := map[string]*fileAgg{}
 	readJSON(indexPath, &index)
 	cut := now.Add(-statsWindow)
@@ -168,7 +186,7 @@ func (a *app) stats(acc Account, now time.Time, force bool) *Stats {
 	deadline := time.Now().Add(statsBudget)
 	complete := true
 	filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() || !strings.HasSuffix(p, ".jsonl") {
+		if err != nil || d.IsDir() || !strings.HasSuffix(p, ".jsonl") || !strings.HasPrefix(d.Name(), src.prefix) {
 			return nil
 		}
 		fi, err := d.Info()
@@ -188,7 +206,7 @@ func (a *app) stats(acc Account, now time.Time, force bool) *Stats {
 		if fa == nil || fa.Ino != ino || fi.Size() < fa.Off {
 			fa = &fileAgg{Ino: ino}
 		}
-		done, err := parseTranscript(p, fa, cut.Unix(), deadline)
+		done, err := src.parse(p, fa, cut.Unix(), deadline)
 		if err == nil {
 			if done {
 				fa.Size, fa.Mtime = fi.Size(), fi.ModTime().UnixNano()
@@ -253,11 +271,9 @@ func readLine(r *bufio.Reader) ([]byte, int64, error) {
 	}
 }
 
-// parseTranscript reads complete lines from fa.Off on and appends assistant
-// messages with usage newer than cut (unix s). Only ids, time, model, cwd
-// base name and token counts are kept. done is false when the deadline
-// stopped it early.
-func parseTranscript(path string, fa *fileAgg, cut int64, deadline time.Time) (done bool, err error) {
+// readLog hands each complete line from fa.Off on to fn and moves fa.Off.
+// done is false when the deadline stopped it early.
+func readLog(path string, fa *fileAgg, deadline time.Time, fn func(line []byte)) (done bool, err error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return false, err
@@ -265,10 +281,6 @@ func parseTranscript(path string, fa *fileAgg, cut int64, deadline time.Time) (d
 	defer f.Close()
 	if _, err := f.Seek(fa.Off, io.SeekStart); err != nil {
 		return false, err
-	}
-	have := map[int64]bool{}
-	for _, r := range fa.Recs {
-		have[r[rKey]] = true
 	}
 	r := bufio.NewReaderSize(f, 1<<20)
 	for i := 0; ; i++ {
@@ -283,8 +295,22 @@ func parseTranscript(path string, fa *fileAgg, cut int64, deadline time.Time) (d
 			return false, err
 		}
 		fa.Off += n
+		fn(line)
+	}
+}
+
+// parseTranscript reads complete lines from fa.Off on and appends assistant
+// messages with usage newer than cut (unix s). Only ids, time, model, cwd
+// base name and token counts are kept. done is false when the deadline
+// stopped it early.
+func parseTranscript(path string, fa *fileAgg, cut int64, deadline time.Time) (done bool, err error) {
+	have := map[int64]bool{}
+	for _, r := range fa.Recs {
+		have[r[rKey]] = true
+	}
+	return readLog(path, fa, deadline, func(line []byte) {
 		if !bytes.Contains(line, assistantMark) {
-			continue
+			return
 		}
 		var e struct {
 			Type      string `json:"type"`
@@ -304,11 +330,11 @@ func parseTranscript(path string, fa *fileAgg, cut int64, deadline time.Time) (d
 		}
 		if json.Unmarshal(line, &e) != nil || e.Type != "assistant" || e.Message.Usage == nil ||
 			e.Message.Model == "" || e.Message.Model == "<synthetic>" {
-			continue
+			return
 		}
 		t, err := time.Parse(time.RFC3339Nano, e.Timestamp)
 		if err != nil || t.Unix() < cut {
-			continue
+			return
 		}
 		var key int64
 		if e.Message.ID != "" || e.RequestID != "" {
@@ -316,7 +342,7 @@ func parseTranscript(path string, fa *fileAgg, cut int64, deadline time.Time) (d
 			h.Write([]byte(e.Message.ID + "\x00" + e.RequestID))
 			key = int64(h.Sum64())
 			if have[key] {
-				continue
+				return
 			}
 			have[key] = true
 		}
@@ -327,7 +353,7 @@ func parseTranscript(path string, fa *fileAgg, cut int64, deadline time.Time) (d
 		u := e.Message.Usage
 		fa.Recs = append(fa.Recs, rec{key, t.Unix(), indexOf(&fa.Models, e.Message.Model),
 			indexOf(&fa.Projects, project), u.In, u.Out, u.CW, u.CR})
-	}
+	})
 }
 
 func indexOf(list *[]string, s string) int64 {

@@ -45,25 +45,42 @@ func iconB64(gs []gauge, dark, letters bool) (string, error) {
 	return base64.StdEncoding.EncodeToString(p), nil
 }
 
+// barGauges are the gauges of the accounts shown in the menu bar.
+func barGauges(states []State, now time.Time) []gauge {
+	var gs []gauge
+	for _, s := range states {
+		if s.Bar {
+			gs = append(gs, toGauge(s, now))
+		}
+	}
+	return gs
+}
+
 // writeMenu prints the SwiftBar output: title image, then the dropdown.
+// Without any account in the menu bar the title is plain text, so the
+// dropdown can still be opened.
 func writeMenu(w io.Writer, states []State, now time.Time, dark bool, exe, home string) error {
-	gs := make([]gauge, len(states))
-	for i, s := range states {
-		gs[i] = toGauge(s, now)
+	if gs := barGauges(states, now); len(gs) > 0 {
+		title, err := iconB64(gs, dark, true)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(w, "| image=%s\n", title)
+	} else {
+		fmt.Fprintln(w, "AI")
 	}
-	title, err := iconB64(gs, dark, true)
-	if err != nil {
-		return err
-	}
-	fmt.Fprintf(w, "| image=%s\n", title)
 	fmt.Fprintln(w, "---")
 
 	var updated time.Time
+	var provs []string
 	for i, s := range states {
 		if i > 0 {
 			fmt.Fprintln(w, "---")
 		}
-		img, err := iconB64(gs[i:i+1], dark, false)
+		if !slices.Contains(provs, s.Provider) {
+			provs = append(provs, s.Provider)
+		}
+		img, err := iconB64([]gauge{toGauge(s, now)}, dark, false)
 		if err != nil {
 			return err
 		}
@@ -85,9 +102,13 @@ func writeMenu(w io.Writer, states []State, now time.Time, dark bool, exe, home 
 
 		if s.HasData {
 			if s.Session != nil {
-				writeRow(w, "5h", s.Session, now)
+				writeRow(w, cmp.Or(s.Session.Label, "5h"), s.Session, now)
 			}
-			writeRow(w, "week", s.Week, now)
+			weekLabel := "week"
+			if s.Week != nil {
+				weekLabel = cmp.Or(s.Week.Label, weekLabel)
+			}
+			writeRow(w, weekLabel, s.Week, now)
 			for i := range s.Scoped {
 				writeRow(w, s.Scoped[i].Label, &s.Scoped[i], now)
 			}
@@ -101,6 +122,13 @@ func writeMenu(w io.Writer, states []State, now time.Time, dark bool, exe, home 
 			if s.Credits != "" {
 				grayLine(w, "credits used "+s.Credits)
 			}
+			switch s.Balance {
+			case "":
+			case "unlimited":
+				grayLine(w, "credits unlimited")
+			default:
+				grayLine(w, "credits balance "+s.Balance)
+			}
 			if s.FetchedAt.After(updated) {
 				updated = s.FetchedAt
 			}
@@ -109,6 +137,12 @@ func writeMenu(w io.Writer, states []State, now time.Time, dark bool, exe, home 
 			grayLine(w, line)
 		}
 		writeLocal(w, s, home)
+		toggle := fmt.Sprintf("Show in menu bar | bash=%s param1=--toggle-bar param2=%s terminal=false refresh=true",
+			pathParam(exe), hashHex(accountKey(s.Provider, s.Name), 4))
+		if s.Bar {
+			toggle += " checked=true"
+		}
+		fmt.Fprintln(w, toggle)
 	}
 
 	fmt.Fprintln(w, "---")
@@ -116,7 +150,19 @@ func writeMenu(w io.Writer, states []State, now time.Time, dark bool, exe, home 
 		fmt.Fprintf(w, "Updated %s | color=%s size=11\n", updated.Local().Format("15:04"), gray)
 	}
 	fmt.Fprintf(w, "Refresh now | bash=%s param1=--force terminal=false refresh=true\n", pathParam(exe))
-	fmt.Fprintf(w, "Usage page | href=%s\n", usageURL)
+	if len(provs) <= 1 {
+		name := "" // no accounts: Claude's page
+		if len(provs) == 1 {
+			name = provs[0]
+		}
+		p, _ := providerOf(name)
+		fmt.Fprintf(w, "Usage page | href=%s\n", p.usageURL)
+		return nil
+	}
+	for _, name := range provs {
+		p, _ := providerOf(name)
+		fmt.Fprintf(w, "%s usage page | href=%s\n", p.title, p.usageURL)
+	}
 	return nil
 }
 

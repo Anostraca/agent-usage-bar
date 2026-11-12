@@ -50,6 +50,7 @@ type Usage struct {
 	Scoped   []Window `json:"scoped,omitempty"`   // per-model weekly limits
 	Surfaces []Share  `json:"surfaces,omitempty"` // weekly usage by surface, used ones only
 	Credits  string   `json:"credits,omitempty"`  // credits spent, when credits are on
+	Balance  string   `json:"balance,omitempty"`  // credits left, or "unlimited"
 }
 
 // Cache is what we keep per account between runs. Never holds tokens.
@@ -64,6 +65,8 @@ type Cache struct {
 // State is one account as shown in the menu.
 type State struct {
 	Name     string    `json:"name"`
+	Provider string    `json:"provider,omitempty"` // "" = Claude
+	Bar      bool      `json:"bar"`                // shown in the menu bar
 	Email    string    `json:"email,omitempty"`
 	Org      string    `json:"org,omitempty"`
 	HasData  bool      `json:"has_data"`
@@ -78,6 +81,7 @@ type app struct {
 	configPath string
 	cacheDir   string
 	baseURL    string
+	codexURL   string
 	now        func() time.Time
 	keychain   func(service string) ([]byte, error)
 	client     *http.Client
@@ -93,6 +97,7 @@ func newApp() (*app, error) {
 		configPath: configPath(home),
 		cacheDir:   filepath.Join(home, "Library", "Caches", "claude-usage-bar"),
 		baseURL:    defaultAPI,
+		codexURL:   defaultCodexAPI,
 		now:        time.Now,
 		keychain:   securityKeychain,
 		client: &http.Client{
@@ -117,27 +122,28 @@ func (a *app) collect(force bool) []State {
 
 // refresh updates one account's cache when due and returns its state.
 func (a *app) refresh(acc Account, force bool) State {
+	p, _ := providerOf(acc.Provider)
 	now := a.now()
-	c := a.loadCache(acc.Name)
-	due := force || c.AttemptAt.IsZero() || now.Sub(c.AttemptAt) >= fetchInterval ||
-		c.Error == errTokenExpired || c.Error == errNoCreds.Error()
+	c := a.loadCache(acc.key())
+	due := force || c.AttemptAt.IsZero() || now.Sub(c.AttemptAt) >= fetchInterval || loginError(c.Error)
 	if due {
 		before := c
-		a.update(&c, acc, now)
+		p.update(a, &c, acc, now)
 		// A concurrent run (SwiftBar vs --force) may have saved newer data.
-		if disk := a.loadCache(acc.Name); disk.FetchedAt.After(c.FetchedAt) {
+		if disk := a.loadCache(acc.key()); disk.FetchedAt.After(c.FetchedAt) {
 			c = disk
 		} else if !reflect.DeepEqual(c, before) {
-			a.saveCache(acc.Name, c)
+			a.saveCache(acc.key(), c)
 		}
 	}
-	p := readProfile(acc.ConfigDir, a.home)
-	st := State{Name: acc.Name, Email: p.Email, Org: p.Org, Cache: c}
+	pr := p.profile(acc.ConfigDir, a.home)
+	st := State{Name: acc.Name, Provider: acc.Provider, Bar: acc.Bar, Email: pr.Email, Org: pr.Org, Cache: c}
 	st.HasData = !c.FetchedAt.IsZero()
-	st.Stale = st.HasData && (c.Error == errTokenExpired || c.Error == errNoCreds.Error() ||
-		now.Sub(c.FetchedAt) > staleAfter)
-	st.Sessions = liveSessions(acc.ConfigDir)
-	st.Stats = a.stats(acc, now, force)
+	st.Stale = st.HasData && (loginError(c.Error) || now.Sub(c.FetchedAt) > staleAfter)
+	if p.sessions != nil {
+		st.Sessions = p.sessions(acc.ConfigDir)
+	}
+	st.Stats = p.stats(a, acc, now, force)
 	return st
 }
 
@@ -209,31 +215,46 @@ type apiUsage struct {
 
 // fetch calls the usage endpoint. Errors are short and never contain the token.
 func (a *app) fetch(token string) (Usage, error) {
+	data, err := a.get(strings.TrimRight(a.baseURL, "/")+usagePath, map[string]string{
+		"Authorization":  "Bearer " + token,
+		"anthropic-beta": "oauth-2025-04-20",
+	})
+	if err != nil {
+		return Usage{}, err
+	}
+	return parseUsage(data)
+}
+
+// get fetches url with the given headers, up to 1 MiB of a 200 response.
+// Redirects are not followed. Errors are short and never contain header
+// values.
+func (a *app) get(url string, header map[string]string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), httpTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(a.baseURL, "/")+usagePath, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return Usage{}, errors.New("bad API URL")
+		return nil, errors.New("bad API URL")
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("anthropic-beta", "oauth-2025-04-20")
+	for k, v := range header {
+		req.Header.Set(k, v)
+	}
 	req.Header.Set("User-Agent", "claude-usage-bar")
 	resp, err := a.client.Do(req)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) || os.IsTimeout(err) {
-			return Usage{}, errors.New("timeout")
+			return nil, errors.New("timeout")
 		}
-		return Usage{}, errors.New("network error")
+		return nil, errors.New("network error")
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return Usage{}, fmt.Errorf("HTTP %d", resp.StatusCode)
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return Usage{}, errors.New("network error")
+		return nil, errors.New("network error")
 	}
-	return parseUsage(data)
+	return data, nil
 }
 
 // parseUsage prefers the "limits" list and falls back to the older

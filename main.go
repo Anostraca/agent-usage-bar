@@ -1,5 +1,5 @@
-// Command claude-usage-bar is a SwiftBar plugin that shows Claude
-// subscription usage for every Claude Code account as battery icons.
+// Command claude-usage-bar is a SwiftBar plugin that shows Claude and
+// Codex subscription usage for every account as battery icons.
 package main
 
 import (
@@ -13,7 +13,7 @@ import (
 
 var version = "dev"
 
-const usageText = `claude-usage-bar - Claude usage battery icons for SwiftBar
+const usageText = `claude-usage-bar - Claude and Codex usage battery icons for SwiftBar
 
 Usage: claude-usage-bar [flag]
 
@@ -23,6 +23,9 @@ Flags:
   --force       fetch all accounts now (ignore the 3 min interval), print nothing
   --png FILE    write the current menu bar image to FILE
   --json        print the parsed state (no tokens)
+  --toggle-bar ID
+                show or hide an account in the menu bar (ID from the dropdown);
+                rewrites the config file
   --install-plugin
                 write the SwiftBar wrapper for this binary into SwiftBar's plugin folder
   --help        show this help
@@ -46,8 +49,8 @@ func main() {
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
-	var force, asJSON, install bool
-	var pngFile string
+	var force, asJSON, install, toggle bool
+	var pngFile, toggleID string
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--force":
@@ -63,6 +66,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 			}
 			i++
 			pngFile = args[i]
+		case "--toggle-bar":
+			if i+1 >= len(args) {
+				fmt.Fprintln(stderr, "--toggle-bar needs an account id")
+				return 2
+			}
+			i++
+			toggle, toggleID = true, args[i]
 		case "--help", "-h":
 			fmt.Fprint(stdout, usageText)
 			return 0
@@ -80,6 +90,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	if toggle {
+		if err := toggleBar(a.configPath, a.home, toggleID); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		return 0
+	}
 	if install {
 		if err := runInstallPlugin(a.home, stdout); err != nil {
 			fmt.Fprintln(stderr, err)
@@ -96,11 +113,7 @@ func (a *app) main(force, asJSON bool, pngFile string, stdout, stderr io.Writer)
 	dark := os.Getenv("OS_APPEARANCE") == "Dark"
 	switch {
 	case pngFile != "":
-		gs := make([]gauge, len(states))
-		for i, s := range states {
-			gs[i] = toGauge(s, now)
-		}
-		p, err := encodePNG(renderIcon(gs, dark, true))
+		p, err := encodePNG(renderIcon(barGauges(states, now), dark, true))
 		if err == nil {
 			err = os.WriteFile(pngFile, p, 0o644)
 		}

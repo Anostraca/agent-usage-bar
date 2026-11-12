@@ -2,6 +2,10 @@ package main
 
 import (
 	"bytes"
+	"errors"
+	"image/png"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -23,7 +27,7 @@ func TestHostileTextNoParamInjection(t *testing.T) {
 	now := time.Date(2026, 11, 9, 15, 16, 0, 0, time.Local)
 	evil := `x" bash=/usr/bin/open param1=-a terminal=false y="`
 	states := []State{{
-		Name: `n'|a href=http://e`, Email: "e\"@example.com\nbash=/bin/sh | color=red", Org: evil, HasData: true,
+		Name: `n'|a href=http://e`, Email: "e\"@example.com\nbash=/bin/sh | color=red", Org: evil, HasData: true, Bar: true,
 		Cache: Cache{Plan: `p" href='h'`, Week: &Window{Percent: 5}, FetchedAt: now, Error: `boom" bash=x`},
 	}}
 	var b bytes.Buffer
@@ -31,7 +35,7 @@ func TestHostileTextNoParamInjection(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := b.String()
-	if n := strings.Count(out, "bash="); n != 1 {
+	if n := strings.Count(out, "bash="); n != 2 { // refresh + bar toggle
 		t.Errorf("bash= appears %d times\n%s", n, out)
 	}
 	if n := strings.Count(out, "href="); n != 1 {
@@ -65,7 +69,7 @@ func TestDuration(t *testing.T) {
 func TestWriteMenu(t *testing.T) {
 	now := time.Date(2026, 11, 9, 15, 16, 0, 0, time.Local)
 	states := []State{
-		{Name: "work", Email: "a@example.com", HasData: true, Cache: Cache{
+		{Name: "work", Email: "a@example.com", HasData: true, Bar: true, Cache: Cache{
 			Plan:      "team 5x",
 			Session:   &Window{Percent: 93, ResetsAt: now.Add(23 * time.Minute)},
 			Week:      &Window{Percent: 35, ResetsAt: now.Add(5*24*time.Hour + 4*time.Hour)},
@@ -82,7 +86,7 @@ func TestWriteMenu(t *testing.T) {
 			Projects: []Count{{"api", 60_000_000}, {"web", 25_000_000}},
 			Models:   []Count{{"claude-opus-5-5", 2_520_000_000}, {"claude-sonnet-5", 293_000_000}},
 		}},
-		{Name: "personal", HasData: true, Stale: true, Cache: Cache{
+		{Name: "personal", HasData: true, Stale: true, Bar: true, Cache: Cache{
 			Usage: Usage{
 				Week:     &Window{Percent: 10, ResetsAt: now.Add(-time.Minute)},
 				Surfaces: []Share{{"Claude Code", 100}},
@@ -91,11 +95,11 @@ func TestWriteMenu(t *testing.T) {
 			FetchedAt: now.Add(-20 * time.Minute),
 			Error:     "HTTP 429",
 		}},
-		{Name: "idle", HasData: true, Cache: Cache{Usage: Usage{
+		{Name: "idle", HasData: true, Bar: true, Cache: Cache{Usage: Usage{
 			Session: &Window{Idle: true},
 			Week:    &Window{Percent: 1, ResetsAt: now.Add(time.Hour)},
 		}, FetchedAt: now}},
-		{Name: "new", Cache: Cache{Error: errNoCreds.Error()}},
+		{Name: "new", Bar: true, Cache: Cache{Error: errNoCreds.Error()}},
 	}
 	var b bytes.Buffer
 	if err := writeMenu(&b, states, now, false, "/opt/my bin/cub", "/h"); err != nil {
@@ -126,7 +130,8 @@ func TestWriteMenu(t *testing.T) {
 		"no data · " + errNoCreds.Error(),
 		"Updated 15:16 |",
 		`Refresh now | bash="/opt/my bin/cub" param1=--force terminal=false refresh=true`,
-		"Usage page | href=https://claude.ai/settings/usage",
+		"\nUsage page | href=https://claude.ai/settings/usage\n",
+		`Show in menu bar | bash="/opt/my bin/cub" param1=--toggle-bar param2=` + hashHex("work", 4) + " terminal=false refresh=true checked=true\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("menu missing %q\n%s", want, out)
@@ -137,6 +142,89 @@ func TestWriteMenu(t *testing.T) {
 	}
 	if strings.Count(out, "5h    ") != 2 {
 		t.Errorf("want 5h rows only for accounts with a 5h limit\n%s", out)
+	}
+	if strings.Count(out, "Show in menu bar |") != 4 || strings.Contains(out, "Claude usage page") ||
+		strings.Contains(out, "credits unlimited") || strings.Contains(out, "credits balance") {
+		t.Errorf("claude-only extras:\n%s", out)
+	}
+}
+
+func TestWriteMenuBarAndProviders(t *testing.T) {
+	now := time.Date(2026, 11, 9, 15, 16, 0, 0, time.Local)
+	states := []State{
+		{Name: "team", Bar: true, HasData: true, Cache: Cache{Usage: Usage{Week: &Window{Percent: 10}}, FetchedAt: now}},
+		{Name: "max", HasData: true, Cache: Cache{Usage: Usage{Week: &Window{Percent: 50}}, FetchedAt: now}},
+		{Name: "cx", Provider: "codex", Bar: true, Email: "cx@example.com", HasData: true, Cache: Cache{Plan: "team", Usage: Usage{
+			Session: &Window{Label: "5h", Percent: 20, ResetsAt: now.Add(time.Hour)},
+			Week:    &Window{Label: "3d", Percent: 80, ResetsAt: now.Add(48 * time.Hour)},
+			Scoped:  []Window{{Label: "review week", Percent: 3, Idle: true}},
+			Balance: "unlimited",
+		}, FetchedAt: now}},
+	}
+	var b bytes.Buffer
+	if err := writeMenu(&b, states, now, false, "/bin/cub", "/h"); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	title, err := iconB64([]gauge{toGauge(states[0], now), toGauge(states[2], now)}, false, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first := strings.SplitN(out, "\n", 2)[0]; first != "| image="+title {
+		t.Errorf("title is not the bar accounts' icon: %.60s", first)
+	}
+	for _, want := range []string{
+		"max · no 5h limit | image=",
+		"cx · team · cx@example.com | image=",
+		"5h    ██████████░░░  80% left   resets 16:16 (in 1h 0m) |",
+		"3d    ███░░░░░░░░░░  20% left   resets ",
+		"review week█████████████ 100% left   idle · starts with next message |",
+		"credits unlimited | color=#8E8E93 size=11\n",
+		"Show in menu bar | bash=/bin/cub param1=--toggle-bar param2=" + hashHex("team", 4) + " terminal=false refresh=true checked=true\n",
+		"Show in menu bar | bash=/bin/cub param1=--toggle-bar param2=" + hashHex("max", 4) + " terminal=false refresh=true\n",
+		"Show in menu bar | bash=/bin/cub param1=--toggle-bar param2=" + hashHex(accountKey("codex", "cx"), 4) + " terminal=false refresh=true checked=true\n",
+		"\nClaude usage page | href=https://claude.ai/settings/usage\nCodex usage page | href=https://chatgpt.com/codex/settings/usage\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("menu missing %q\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "\nUsage page") || strings.Count(out, "week  ") != 2 { // team and max only
+		t.Errorf("unexpected lines\n%s", out)
+	}
+
+	// Nothing in the bar: a text title keeps the menu clickable.
+	for i := range states {
+		states[i].Bar = false
+	}
+	b.Reset()
+	if err := writeMenu(&b, states, now, false, "/bin/cub", "/h"); err != nil {
+		t.Fatal(err)
+	}
+	if out := b.String(); !strings.HasPrefix(out, "AI\n---\n") || strings.Count(out, "image=") != 3 ||
+		strings.Contains(out, "checked=true") {
+		t.Errorf("all hidden:\n%s", out)
+	}
+}
+
+func TestPNGBarAccountsOnly(t *testing.T) {
+	home := t.TempDir()
+	cfg := filepath.Join(home, "config.json")
+	writeFile(t, cfg, `{"accounts":[{"name":"a"},{"name":"b","bar":false},{"name":"c","provider":"codex"}]}`)
+	a := &app{home: home, configPath: cfg, cacheDir: filepath.Join(home, "cache"),
+		now: time.Now, keychain: func(string) ([]byte, error) { return nil, errors.New("none") }}
+	file := filepath.Join(home, "bar.png")
+	var out, errOut bytes.Buffer
+	if code := a.main(false, false, file, &out, &errOut); code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut.String())
+	}
+	data, _ := os.ReadFile(file)
+	img, err := png.Decode(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w := img.Bounds().Dx(); w != int((2*gaugeWidth(true)+accountGap)*pxPerPt) {
+		t.Errorf("width %d, want two gauges", w)
 	}
 }
 

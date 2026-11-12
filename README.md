@@ -1,10 +1,10 @@
 # claude-usage-bar
 
-A [SwiftBar](https://github.com/swiftbar/SwiftBar) plugin that shows your Claude subscription limits
-in the macOS menu bar. You get one small battery per Claude Code account, and it drains as you use
-the account.
+A [SwiftBar](https://github.com/swiftbar/SwiftBar) plugin that shows your Claude and Codex subscription
+limits in the macOS menu bar. You get one small battery per Claude Code or Codex account, and it drains
+as you use the account.
 
-Not affiliated with Anthropic. See [Disclaimer](#disclaimer).
+Not affiliated with Anthropic or OpenAI. See [Disclaimer](#disclaimer).
 
 ## What it shows
 
@@ -43,12 +43,22 @@ Models · 7 days                        ▸
 The limit rows come from Anthropic's usage API, with a row for each per-model weekly limit. Sessions
 and token numbers come from the files Claude Code keeps on your Mac.
 
+Codex accounts (the ChatGPT login of the Codex CLI or app) show the same block. The rows come from
+ChatGPT's usage API and are labelled by window length (`5h`, `week`), with extra rows for code review
+and other limits when the plan has them. Token numbers come from Codex's session logs. There is no
+running-sessions line for Codex.
+
+Each account ends with a **Show in menu bar** item. Untick it to keep that account in the dropdown
+only. With every account hidden, the menu bar shows the text `AI`.
+
 ## Requirements
 
 - macOS (the login is read from the Keychain)
 - [SwiftBar](https://github.com/swiftbar/SwiftBar)
 - [Claude Code](https://docs.claude.com/en/docs/claude-code) logged in with a Claude Pro, Max or Team
-  subscription (not an API key)
+  subscription (not an API key), and/or
+- [Codex](https://developers.openai.com/codex) logged in with a ChatGPT plan (`codex login`, not an API
+  key)
 
 ## Install
 
@@ -84,19 +94,29 @@ runs the plugin every minute. If you move the binary, run `--install-plugin` aga
 ## Config
 
 Optional: `~/.config/claude-usage-bar/config.json` (or `$XDG_CONFIG_HOME/claude-usage-bar/config.json`).
-List one entry per Claude Code login, with the `CLAUDE_CONFIG_DIR` that login uses:
+List one entry per login:
 
 ```json
 {
   "accounts": [
     {"name": "work", "config_dir": "~/.claude"},
-    {"name": "personal", "config_dir": "~/.claude-personal"}
+    {"name": "personal", "config_dir": "~/.claude-personal", "bar": false},
+    {"name": "codex", "provider": "codex"}
   ]
 }
 ```
 
-Without the file you get one account, `claude`, with `~/.claude`. The first letter of each name
-appears in the menu bar. Relative `config_dir` paths are skipped.
+- `provider`: `claude` (the default) or `codex`. Entries with another provider are skipped.
+- `config_dir`: the `CLAUDE_CONFIG_DIR` (or `CODEX_HOME`) that login uses. Empty means `~/.claude` or
+  `~/.codex`. Relative paths are skipped.
+- `bar`: `false` shows the account in the dropdown only. The default is `true`.
+
+Without the file you get `claude` with `~/.claude`, plus `codex` with `~/.codex` when
+`~/.codex/auth.json` exists. The first letter of each name appears in the menu bar.
+
+The **Show in menu bar** item runs `--toggle-bar`, which rewrites this file: it sets `"bar": false` or
+removes the key, and keeps everything else. Without a file it writes the default accounts. A file that
+isn't valid JSON is left alone.
 
 ## Data sources
 
@@ -110,27 +130,37 @@ appears in the menu bar. Relative `config_dir` paths are skipped.
 - **Tokens**: assistant-message usage numbers from `<config_dir>/projects/**/*.jsonl` changed in the
   last 7 days. These are recomputed at most every 2 minutes, and each run only reads lines added
   since the last one.
+- **Codex login**: `tokens.access_token` and `tokens.account_id` from `<config_dir>/auth.json`. The
+  expiry, email and plan are read from the token's claims (the signature is not checked).
+- **Codex limits**: `GET https://chatgpt.com/backend-api/wham/usage`, at most every 3 minutes per
+  account.
+- **Codex tokens**: `token_count` events in `<config_dir>/sessions/YYYY/MM/DD/rollout-*.jsonl`, with
+  the model and folder of the latest turn. Same 7 days and incremental reads as above.
 
 Caches live in `~/Library/Caches/claude-usage-bar/`.
 
 Flags: `--force` (fetch now, print nothing), `--png FILE` (write the menu bar image), `--json` (dump
-the parsed state), `--install-plugin`, `--version`.
+the parsed state), `--toggle-bar ID` (show or hide an account in the menu bar), `--install-plugin`,
+`--version`.
 
 ## Privacy
 
-- Tokens are read-only from the Keychain (or Claude Code's `.credentials.json` fallback), never
-  stored, logged or refreshed. The refresh token is never used, and nothing is ever written to the
-  Keychain. When a token has expired, open `claude` on that account and it renews the login itself.
+- Tokens are read-only from the Keychain (or Claude Code's `.credentials.json` fallback) and Codex's
+  `auth.json`, never stored, logged or refreshed. Refresh tokens are never used, and nothing is ever
+  written to the Keychain or `auth.json`. When a token has expired, open `claude` or `codex` on that
+  account and it renews the login itself.
 - Transcripts are only read for usage numbers: token counts, model name, time, and the base name of
   the working folder. Message text is never stored or shown.
 - Caches hold usage percentages, reset times, token counts, model and folder names. No tokens, no
   message content.
-- The only network request goes to `api.anthropic.com`.
+- Network requests go only to `api.anthropic.com` and `chatgpt.com`.
+- The config file is only written by the **Show in menu bar** item.
 
 ## Disclaimer
 
-`/api/oauth/usage` is an undocumented, unofficial endpoint. Claude Code uses it, but it may change or
-disappear at any time. This project is not affiliated with or endorsed by Anthropic.
+`/api/oauth/usage` and `/backend-api/wham/usage` are undocumented, unofficial endpoints. Claude Code and
+Codex use them, but they may change or disappear at any time. This project is not affiliated with or
+endorsed by Anthropic or OpenAI.
 
 ## License
 
