@@ -142,6 +142,18 @@ func TestParseLimits(t *testing.T) {
 		t.Errorf("credits = %q", u.Credits)
 	}
 
+	// is_active marks the binding limit, not a started window: a running
+	// session below the weekly limit has is_active false.
+	u, err = parseUsage([]byte(`{"limits":[
+{"kind":"session","percent":40,"resets_at":"2026-11-13T13:30:00.728925+00:00","is_active":false},
+{"kind":"weekly_all","percent":50,"resets_at":"2026-11-14T20:00:00.728947+00:00","is_active":true}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.Session == nil || u.Session.Percent != 40 || u.Session.Idle {
+		t.Errorf("running session = %+v", u.Session)
+	}
+
 	u, err = parseUsage([]byte(maxLimits))
 	if err != nil {
 		t.Fatal(err)

@@ -194,7 +194,6 @@ type apiLimit struct {
 	Kind     string   `json:"kind"`
 	Percent  *float64 `json:"percent"`
 	ResetsAt string   `json:"resets_at"`
-	IsActive *bool    `json:"is_active"`
 	Scope    *struct {
 		Model *struct {
 			DisplayName string `json:"display_name"`
@@ -337,7 +336,8 @@ func (l apiLimit) window() *Window {
 	if t, err := time.Parse(time.RFC3339Nano, l.ResetsAt); err == nil {
 		w.ResetsAt = t
 	}
-	w.Idle = w.ResetsAt.IsZero() || l.Kind == "session" && l.IsActive != nil && !*l.IsActive
+	// The API's is_active marks the binding limit, not a started window.
+	w.Idle = w.ResetsAt.IsZero()
 	return w
 }
 
