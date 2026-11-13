@@ -46,8 +46,8 @@ func TestHostileTextNoParamInjection(t *testing.T) {
 		line   string
 		params string
 	}{
-		{lines[2], `^image=[A-Za-z0-9+/=]+ font=Menlo size=12$`}, // account line
-		{lines[3], `^tooltip="[^"']*"$`},                         // head in the submenu: one quoted tooltip
+		{lines[2], `^image=[A-Za-z0-9+/=]+ font=Menlo size=12 refresh=true$`}, // account line
+		{lines[3], `^tooltip="[^"']*"$`},                                      // head in the submenu: one quoted tooltip
 	} {
 		_, params, _ := strings.Cut(c.line, " | ")
 		if !regexp.MustCompile(c.params).MatchString(params) || strings.Count(c.line, "|") != 1 {
@@ -117,7 +117,7 @@ func TestWriteMenu(t *testing.T) {
 		"| image=",
 		// One top-level line per account: names padded, worst colour.
 		"\nwork       5h 7% · week 65% · Fable 20% | image=",
-		" font=Menlo size=12 color=#E5534B\n--work · team 5x · a@example.com\n",
+		" font=Menlo size=12 refresh=true color=#E5534B\n--work · team 5x · a@example.com\n",
 		"\npersonal   week 100% · stale | image=",
 		"\nidle       5h 100% · week 99% | image=",
 		"\nnew        no data | image=",
@@ -126,7 +126,7 @@ func TestWriteMenu(t *testing.T) {
 		"\n--week  ████████░░░░░  65% left   resets ",
 		"(in 5d 4h) | font=Menlo size=12\n",
 		"\n--Fable ███░░░░░░░░░░  20% left   resets 16:16 (in 1h 0m) | font=Menlo size=12 color=#E0A030\n",
-		"\n--● 3 sessions · 2 busy, 1 idle\n----api        ~/src/api  busy | font=Menlo size=12\n",
+		"\n--● 3 sessions · 2 busy, 1 idle | refresh=true\n----api        ~/src/api  busy | font=Menlo size=12\n",
 		"\n----docs-site  /srv/docs  idle |",
 		"\n--Today   85M tok · 700k out · 637 msgs · cache 97% | font=Menlo size=12\n",
 		"\n--7 days  2.8B tok · 13M out · 12.7k msgs | font=Menlo size=12\n",
@@ -192,7 +192,7 @@ func TestWriteMenuBarAndProviders(t *testing.T) {
 		"\nteam   week 90% | image=",
 		"\nmax    week 50% | image=",
 		"\ncx     5h 80% · 3d 20% · review week 100% | image=",
-		" font=Menlo size=12 color=#E0A030\n--cx · team · cx@example.com\n",
+		" font=Menlo size=12 refresh=true color=#E0A030\n--cx · team · cx@example.com\n",
 		"\n--max · no 5h limit\n",
 		"\n--5h    ██████████░░░  80% left   resets 16:16 (in 1h 0m) |",
 		"\n--3d    ███░░░░░░░░░░  20% left   resets ",

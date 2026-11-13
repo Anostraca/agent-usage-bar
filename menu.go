@@ -88,7 +88,7 @@ func writeMenu(w io.Writer, states []State, now time.Time, dark bool, exe, home 
 			return err
 		}
 		text, color := accountLine(s, p, now)
-		params := "image=" + img + " " + rowParams
+		params := "image=" + img + " " + rowParams + " " + parentParams
 		if color != "" {
 			params += " color=" + color
 		}
@@ -127,6 +127,13 @@ const (
 	sub    = "--"
 	subSep = "-----"
 )
+
+// parentParams goes on every row whose text changes and that has a submenu.
+// SwiftBar 2.1.1 patches a changed row in place and clears the action of a
+// row without one of its own, which drops AppKit's submenu action and leaves
+// the row greyed out with its submenu unreachable. A row with an action stays
+// enabled; clicking it refreshes.
+const parentParams = "refresh=true"
 
 // accountLine is the account's top-level summary: what is left of each
 // window, worst colour first. Errors with data stay in the submenu.
@@ -282,7 +289,7 @@ func writeLocal(w io.Writer, prefix string, s State, home string) {
 		for _, st := range order {
 			parts = append(parts, fmt.Sprintf("%d %s", counts[st], cmp.Or(st, "unknown")))
 		}
-		fmt.Fprintf(w, "%s● %s · %s\n", prefix, plural(n, "session"), clean(strings.Join(parts, ", ")))
+		fmt.Fprintf(w, "%s● %s · %s | %s\n", prefix, plural(n, "session"), clean(strings.Join(parts, ", ")), parentParams)
 		for i, x := range s.Sessions {
 			fmt.Fprintf(w, "%s%s | %s\n", deeper, clean(names[i]+"  "+shortPath(x.Cwd, home)+"  "+x.Status), rowParams)
 		}
