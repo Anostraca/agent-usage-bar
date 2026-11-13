@@ -116,8 +116,8 @@ func TestWriteMenu(t *testing.T) {
 	for _, want := range []string{
 		"| image=",
 		// One top-level line per account: names padded, worst colour.
-		"\nwork       5h 7% · week 65% · Fable 20% | image=",
-		" font=Menlo size=12 refresh=true color=#E5534B\n--work · team 5x · a@example.com\n",
+		"\n\x1b[31mwork       5h 7% · week 65% · Fable 20% | image=",
+		" font=Menlo size=12 refresh=true ansi=true\n--work · team 5x · a@example.com\n",
 		"\npersonal   week 100% · stale | image=",
 		"\nidle       5h 100% · week 99% | image=",
 		"\nnew        no data | image=",
@@ -191,8 +191,8 @@ func TestWriteMenuBarAndProviders(t *testing.T) {
 	for _, want := range []string{
 		"\nteam   week 90% | image=",
 		"\nmax    week 50% | image=",
-		"\ncx     5h 80% · 3d 20% · review week 100% | image=",
-		" font=Menlo size=12 refresh=true color=#E0A030\n--cx · team · cx@example.com\n",
+		"\n\x1b[38;5;178mcx     5h 80% · 3d 20% · review week 100% | image=",
+		" font=Menlo size=12 refresh=true ansi=true\n--cx · team · cx@example.com\n",
 		"\n--max · no 5h limit\n",
 		"\n--5h    ██████████░░░  80% left   resets 16:16 (in 1h 0m) |",
 		"\n--3d    ███░░░░░░░░░░  20% left   resets ",

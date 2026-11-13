@@ -88,11 +88,13 @@ func writeMenu(w io.Writer, states []State, now time.Time, dark bool, exe, home 
 			return err
 		}
 		text, color := accountLine(s, p, now)
+		title := clean(names[i] + "   " + text)
 		params := "image=" + img + " " + rowParams + " " + parentParams
-		if color != "" {
-			params += " color=" + color
+		if code := ansiOf(color); code != "" {
+			title = "\x1b[" + code + "m" + title
+			params += " ansi=true"
 		}
-		fmt.Fprintf(w, "%s | %s\n", clean(names[i]+"   "+text), params)
+		fmt.Fprintf(w, "%s | %s\n", title, params)
 		writeAccount(w, sub, s, p, now, exe, home)
 		if s.HasData && s.FetchedAt.After(updated) {
 			updated = s.FetchedAt
@@ -439,6 +441,21 @@ func levelHex(p float64) string {
 		return redHex
 	case p >= 75:
 		return amberHex
+	}
+	return ""
+}
+
+// ansiOf is the ANSI colour code for a level colour, for rows with an image.
+// On macOS 26 and later SwiftBar 2.1.1 keeps the image inside the row's
+// title and rebuilds the title of a color= row without it once the pointer
+// has been over the row. An ansi=true row is left alone. Amber is the
+// 256-colour entry closest to amberHex, red is the system red.
+func ansiOf(hex string) string {
+	switch hex {
+	case amberHex:
+		return "38;5;178"
+	case redHex:
+		return "31"
 	}
 	return ""
 }
