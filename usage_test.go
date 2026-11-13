@@ -49,7 +49,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		fmt.Fprint(w, e.body.Load().(string))
 	}))
 	t.Cleanup(srv.Close)
-	e0 := filepath.Join(home, ".config", "claude-usage-bar", "config.json")
+	e0 := filepath.Join(home, ".config", "agent-usage-bar", "config.json")
 	writeFile(t, e0,
 		`{"accounts":[{"name":"max","config_dir":"~/.claude-max"}]}`)
 	writeFile(t, filepath.Join(home, ".claude-max", ".claude.json"),

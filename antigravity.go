@@ -234,7 +234,7 @@ func (a *app) agyPost(ctx context.Context, scheme string, port int, csrf string)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Connect-Protocol-Version", "1")
 	req.Header.Set("X-Codeium-Csrf-Token", csrf)
-	req.Header.Set("User-Agent", "claude-usage-bar")
+	req.Header.Set("User-Agent", "agent-usage-bar")
 	resp, err := a.agyHTTP.Do(req)
 	if err != nil {
 		return nil, errors.New("network error")

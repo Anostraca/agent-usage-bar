@@ -1,4 +1,4 @@
-# claude-usage-bar
+# agent-usage-bar
 
 A [SwiftBar](https://github.com/swiftbar/SwiftBar) plugin that shows your Claude, Codex and Antigravity
 subscription limits in the macOS menu bar. You get one small battery per Claude Code, Codex or
@@ -88,35 +88,47 @@ only. With every account hidden, the menu bar shows the text `AI`.
 A. With Go 1.27 or newer:
 
 ```sh
-go install github.com/Anostraca/claude-usage-bar@latest
-claude-usage-bar --install-plugin
+go install github.com/Anostraca/agent-usage-bar@latest
+agent-usage-bar --install-plugin
 ```
 
-B. Release binary: download `claude-usage-bar-<version>-darwin-<arm64|amd64>` from the releases page,
+B. Release binary: download `agent-usage-bar-<version>-darwin-<arm64|amd64>` from the releases page,
 then:
 
 ```sh
-chmod +x claude-usage-bar-*-darwin-*
-mv claude-usage-bar-*-darwin-* ~/.local/bin/claude-usage-bar
-xattr -d com.apple.quarantine ~/.local/bin/claude-usage-bar 2>/dev/null
-~/.local/bin/claude-usage-bar --install-plugin
+chmod +x agent-usage-bar-*-darwin-*
+mv agent-usage-bar-*-darwin-* ~/.local/bin/agent-usage-bar
+xattr -d com.apple.quarantine ~/.local/bin/agent-usage-bar 2>/dev/null
+~/.local/bin/agent-usage-bar --install-plugin
 ```
 
 C. From source:
 
 ```sh
-git clone https://github.com/Anostraca/claude-usage-bar && cd claude-usage-bar
+git clone https://github.com/Anostraca/agent-usage-bar && cd agent-usage-bar
 make install        # builds, installs to ~/.local/bin, writes the SwiftBar plugin
 make test
 ```
 
-`--install-plugin` writes `claude-usage-bar.1m.sh` into SwiftBar's plugin folder. It finds the folder
+`--install-plugin` writes `agent-usage-bar.1m.sh` into SwiftBar's plugin folder. It finds the folder
 with `defaults read com.ameba.SwiftBar PluginDirectory` and falls back to `~/SwiftBar`. SwiftBar then
 runs the plugin every minute. If you move the binary, run `--install-plugin` again.
 
+### Upgrading from claude-usage-bar
+
+Install the binary under the new name (any option above), then run `agent-usage-bar --install-plugin`.
+It also removes the old `claude-usage-bar.1m.sh` wrapper. The old config in
+`~/.config/claude-usage-bar/` is still read while the new one is missing; moving it is recommended:
+
+```sh
+mv ~/.config/claude-usage-bar ~/.config/agent-usage-bar
+```
+
+The old `claude-usage-bar` binary and `~/Library/Caches/claude-usage-bar/` can be deleted.
+
 ## Config
 
-Optional: `~/.config/claude-usage-bar/config.json` (or `$XDG_CONFIG_HOME/claude-usage-bar/config.json`).
+Optional: `~/.config/agent-usage-bar/config.json` (or `$XDG_CONFIG_HOME/agent-usage-bar/config.json`).
 List one entry per login:
 
 ```json
@@ -167,7 +179,7 @@ isn't valid JSON is left alone.
   `POST https://127.0.0.1:<port>/exa.language_server_pb.LanguageServerService/GetUserStatus` (or
   `http://`), at most every 3 minutes. Plan, email and model quotas come from the answer.
 
-Caches live in `~/Library/Caches/claude-usage-bar/`.
+Caches live in `~/Library/Caches/agent-usage-bar/`.
 
 Flags: `--force` (fetch now, print nothing), `--png FILE` (write the menu bar image), `--json` (dump
 the parsed state), `--toggle-bar ID` (show or hide an account in the menu bar), `--install-plugin`,

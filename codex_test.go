@@ -179,7 +179,7 @@ func newCodexEnv(t *testing.T) *codexEnv {
 		ok := r.URL.Path == codexUsagePath && r.Header.Get("ChatGPT-Account-Id") == codexAcct &&
 			strings.HasPrefix(r.Header.Get("Authorization"), "Bearer e30.") &&
 			strings.HasSuffix(r.Header.Get("Authorization"), "."+codexSecret) &&
-			r.Header.Get("User-Agent") == "claude-usage-bar"
+			r.Header.Get("User-Agent") == "agent-usage-bar"
 		if !ok {
 			w.WriteHeader(400)
 			return
@@ -187,7 +187,7 @@ func newCodexEnv(t *testing.T) *codexEnv {
 		fmt.Fprint(w, codexSample)
 	}))
 	t.Cleanup(srv.Close)
-	cfg := filepath.Join(home, ".config", "claude-usage-bar", "config.json")
+	cfg := filepath.Join(home, ".config", "agent-usage-bar", "config.json")
 	writeFile(t, cfg, `{"accounts":[{"name":"cx","provider":"codex"}]}`)
 	writeFile(t, filepath.Join(e.dir, "auth.json"), codexAuthJSON(e.clock.Add(time.Hour)))
 	e.app = &app{

@@ -1,4 +1,4 @@
-// Command claude-usage-bar is a SwiftBar plugin that shows Claude, Codex
+// Command agent-usage-bar is a SwiftBar plugin that shows Claude, Codex
 // and Antigravity subscription usage for every account as battery icons.
 package main
 
@@ -13,9 +13,9 @@ import (
 
 var version = "dev"
 
-const usageText = `claude-usage-bar - Claude, Codex and Antigravity usage battery icons for SwiftBar
+const usageText = `agent-usage-bar - Claude, Codex and Antigravity usage battery icons for SwiftBar
 
-Usage: claude-usage-bar [flag]
+Usage: agent-usage-bar [flag]
 
 Without a flag it prints SwiftBar output.
 
@@ -142,7 +142,7 @@ func (a *app) main(force, asJSON bool, pngFile string, stdout, stderr io.Writer)
 func selfPath() string {
 	exe, err := os.Executable()
 	if err != nil {
-		return "claude-usage-bar"
+		return "agent-usage-bar"
 	}
 	if p, err := filepath.EvalSymlinks(exe); err == nil {
 		return p

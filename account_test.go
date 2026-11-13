@@ -55,7 +55,7 @@ func TestLoadAccounts(t *testing.T) {
 	fallback := []Account{{Name: "claude", ConfigDir: filepath.Join(home, ".claude"), Bar: true}}
 	t.Setenv("XDG_CONFIG_HOME", "")
 	cfg := configPath(home)
-	if cfg != filepath.Join(home, ".config", "claude-usage-bar", "config.json") {
+	if cfg != filepath.Join(home, ".config", "agent-usage-bar", "config.json") {
 		t.Errorf("config path = %s", cfg)
 	}
 	if got := loadAccounts(cfg, home); !reflect.DeepEqual(got, fallback) {
@@ -148,8 +148,35 @@ func TestPlanName(t *testing.T) {
 
 func TestConfigPathXDG(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "/x/cfg")
-	if got := configPath("/h"); got != "/x/cfg/claude-usage-bar/config.json" {
+	if got := configPath("/h"); got != "/x/cfg/agent-usage-bar/config.json" {
 		t.Errorf("config path = %s", got)
+	}
+}
+
+func TestConfigPathLegacy(t *testing.T) {
+	cases := []struct {
+		name          string
+		newer, legacy bool
+		want          string
+	}{
+		{"both", true, true, "agent-usage-bar"},
+		{"legacy only", false, true, legacyName},
+		{"neither", false, false, "agent-usage-bar"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			base := t.TempDir()
+			t.Setenv("XDG_CONFIG_HOME", base)
+			if c.newer {
+				writeFile(t, filepath.Join(base, "agent-usage-bar", "config.json"), "{}")
+			}
+			if c.legacy {
+				writeFile(t, filepath.Join(base, legacyName, "config.json"), "{}")
+			}
+			if got, want := configPath("/h"), filepath.Join(base, c.want, "config.json"); got != want {
+				t.Errorf("config path = %s, want %s", got, want)
+			}
+		})
 	}
 }
 

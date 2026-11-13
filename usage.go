@@ -99,7 +99,7 @@ func newApp() (*app, error) {
 	return &app{
 		home:       home,
 		configPath: configPath(home),
-		cacheDir:   filepath.Join(home, "Library", "Caches", "claude-usage-bar"),
+		cacheDir:   filepath.Join(home, "Library", "Caches", "agent-usage-bar"),
 		baseURL:    defaultAPI,
 		codexURL:   defaultCodexAPI,
 		now:        time.Now,
@@ -250,7 +250,7 @@ func (a *app) get(url string, header map[string]string) ([]byte, error) {
 	for k, v := range header {
 		req.Header.Set(k, v)
 	}
-	req.Header.Set("User-Agent", "claude-usage-bar")
+	req.Header.Set("User-Agent", "agent-usage-bar")
 	resp, err := a.client.Do(req)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) || os.IsTimeout(err) {

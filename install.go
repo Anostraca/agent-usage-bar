@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-const pluginName = "claude-usage-bar.1m.sh"
+const pluginName = "agent-usage-bar.1m.sh"
 
 // pluginDir is SwiftBar's plugin folder, or ~/SwiftBar.
 func pluginDir(home string) string {
@@ -31,13 +31,13 @@ func pluginScript(exe, version string) string {
 		version = "v" + version
 	}
 	return `#!/bin/bash
-# <xbar.title>Claude Usage</xbar.title>
+# <xbar.title>Agent Usage</xbar.title>
 # <xbar.version>` + version + `</xbar.version>
 # <xbar.author>Jiří Grmolec</xbar.author>
 # <xbar.author.github>Anostraca</xbar.author.github>
-# <xbar.desc>Claude session and weekly usage as battery icons</xbar.desc>
-# <xbar.dependencies>claude-usage-bar,claude-code</xbar.dependencies>
-# <xbar.abouturl>https://github.com/Anostraca/claude-usage-bar</xbar.abouturl>
+# <xbar.desc>Claude, Codex and Antigravity usage as battery icons</xbar.desc>
+# <xbar.dependencies>agent-usage-bar,claude-code</xbar.dependencies>
+# <xbar.abouturl>https://github.com/Anostraca/agent-usage-bar</xbar.abouturl>
 # <swiftbar.hideAbout>true</swiftbar.hideAbout>
 # <swiftbar.hideRunInTerminal>true</swiftbar.hideRunInTerminal>
 # <swiftbar.hideLastUpdated>true</swiftbar.hideLastUpdated>
@@ -45,34 +45,50 @@ exec '` + strings.ReplaceAll(exe, `'`, `'\''`) + `' "$@"
 `
 }
 
-// installPlugin writes the wrapper into dir and returns its path.
-func installPlugin(dir, exe, version string) (string, error) {
+// installPlugin writes the wrapper into dir and returns its path. It also
+// removes a legacy claude-usage-bar wrapper (file or symlink) and returns
+// its path in removed.
+func installPlugin(dir, exe, version string) (p, removed string, err error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
+		return "", "", err
 	}
-	p := filepath.Join(dir, pluginName)
+	p = filepath.Join(dir, pluginName)
 	if fi, err := os.Lstat(p); err == nil && fi.IsDir() {
-		return "", fmt.Errorf("%s is a directory", p)
+		return "", "", fmt.Errorf("%s is a directory", p)
 	}
 	// Temp file + rename replaces a symlink instead of writing through it.
-	f, err := os.CreateTemp(dir, ".claude-usage-bar-*")
+	f, err := os.CreateTemp(dir, ".agent-usage-bar-*")
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	defer os.Remove(f.Name())
 	_, werr := f.WriteString(pluginScript(exe, version))
 	cerr := f.Close()
 	if err := cmp.Or(werr, cerr, os.Chmod(f.Name(), 0o755)); err != nil {
-		return "", err
+		return "", "", err
 	}
-	return p, os.Rename(f.Name(), p)
+	if err := os.Rename(f.Name(), p); err != nil {
+		return "", "", err
+	}
+	old := filepath.Join(dir, legacyName+".1m.sh")
+	if fi, err := os.Lstat(old); err == nil && !fi.IsDir() {
+		if err := os.Remove(old); err == nil {
+			removed = old
+		} else if !os.IsNotExist(err) {
+			return p, "", err
+		}
+	}
+	return p, removed, nil
 }
 
 func runInstallPlugin(home string, w io.Writer) error {
-	p, err := installPlugin(pluginDir(home), selfPath(), versionString())
+	p, removed, err := installPlugin(pluginDir(home), selfPath(), versionString())
 	if err != nil {
 		return err
 	}
 	fmt.Fprintln(w, "wrote", p)
+	if removed != "" {
+		fmt.Fprintln(w, "removed", removed)
+	}
 	return nil
 }

@@ -66,14 +66,26 @@ func (c accountConf) account(home string) (Account, bool) {
 	return Account{Name: c.Name, ConfigDir: dir, Provider: prov, Bar: c.Bar == nil || *c.Bar}, true
 }
 
-// configPath is $XDG_CONFIG_HOME/claude-usage-bar/config.json, by default
-// under ~/.config.
+// legacyName is the project's former name, still honoured for the config
+// dir and removed as a plugin wrapper.
+const legacyName = "claude-usage-bar"
+
+// configPath is $XDG_CONFIG_HOME/agent-usage-bar/config.json, by default
+// under ~/.config. A legacy claude-usage-bar config is used while the new
+// one is missing.
 func configPath(home string) string {
 	base := os.Getenv("XDG_CONFIG_HOME")
 	if base == "" || !filepath.IsAbs(base) {
 		base = filepath.Join(home, ".config")
 	}
-	return filepath.Join(base, "claude-usage-bar", "config.json")
+	p := filepath.Join(base, "agent-usage-bar", "config.json")
+	if _, err := os.Stat(p); os.IsNotExist(err) {
+		legacy := filepath.Join(base, legacyName, "config.json")
+		if _, err := os.Stat(legacy); err == nil {
+			return legacy
+		}
+	}
+	return p
 }
 
 // loadAccounts reads the account list from the config file. Without one it
