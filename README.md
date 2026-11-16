@@ -110,6 +110,14 @@ make install        # builds, installs to ~/.local/bin, writes the SwiftBar plug
 make test
 ```
 
+D. With Homebrew:
+
+```sh
+brew tap anostraca/agent-usage-bar https://github.com/Anostraca/agent-usage-bar
+brew install agent-usage-bar
+agent-usage-bar --install-plugin
+```
+
 `--install-plugin` writes `agent-usage-bar.1m.sh` into SwiftBar's plugin folder. It finds the folder
 with `defaults read com.ameba.SwiftBar PluginDirectory` and falls back to `~/SwiftBar`. SwiftBar then
 runs the plugin every minute. If you move the binary, run `--install-plugin` again.
