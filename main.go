@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"runtime/debug"
 )
 
@@ -143,9 +142,6 @@ func selfPath() string {
 	exe, err := os.Executable()
 	if err != nil {
 		return "agent-usage-bar"
-	}
-	if p, err := filepath.EvalSymlinks(exe); err == nil {
-		return p
 	}
 	return exe
 }
